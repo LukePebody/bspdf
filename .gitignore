@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pdf
+cache/
+blog_*.png
+test_output.pdf
