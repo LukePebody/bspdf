@@ -15,6 +15,7 @@ from puzzles import (
     MidloopPuzzle, PipelinkPuzzle, FireflyPuzzle, UnknownPuzzle,
     MashuPuzzle, SimpleLoopPuzzle, StarBattlePuzzle, IcelomPuzzle, BarnsPuzzle,
     ReflectPuzzle, SlalomPuzzle, KinkonkanPuzzle, ShwolfPuzzle, WagiriPuzzle,
+    CbblockPuzzle, BdblockPuzzle, KakuroPuzzle,
 )
 
 # Register Japanese font
@@ -73,7 +74,6 @@ ENGLISH_NAMES = {
     "mochikoro": "Mochikoro",
     "sukoro": "Sukoro",
     "wagiri": "Wagiri",
-    "factors": "Rooms of Factors",
     "shugaku": "School Trip",
     "ayeheya": "Aye-Heya",
     "yajikazu": "Yajikazu",
@@ -212,6 +212,7 @@ def render_nurikabe(c, puzzle):
     is_shugaku = puzzle.puzzle_type == "shugaku"
     is_hashi = puzzle.puzzle_type == "hashi"
     is_fivecells = puzzle.puzzle_type == "fivecells"
+    is_tasquare = puzzle.puzzle_type == "tasquare"
 
     is_gokigen = puzzle.puzzle_type == "gokigen"
 
@@ -356,6 +357,16 @@ def render_nurikabe(c, puzzle):
                 c.setFillColorRGB(0, 0, 0)
                 c.setFont("Helvetica-Bold", font_size)
                 c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+        elif is_tasquare:
+            # Tasquare: filled black cell with white number; '.' = empty black cell
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                   cell_size, cell_size, stroke=0, fill=1)
+            if val >= 0:
+                c.setFillColorRGB(1, 1, 1)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+            c.setFillColorRGB(0, 0, 0)
         else:
             c.setFont("Helvetica-Bold", font_size)
             c.drawCentredString(cx, cy - font_size * 0.3, str(val))
@@ -1055,6 +1066,55 @@ def render_shwolf(c, puzzle):
             c.circle(cx, cy, radius, stroke=0, fill=1)
 
 
+def render_cbblock(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_region_borders(c, puzzle, cell_size, x0, y0)
+
+
+def render_bdblock(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    # Cross dots (border-block markers) on interior intersections
+    dot_r = cell_size * 0.1
+    c.setFillColorRGB(0, 0, 0)
+    for cr, cc in puzzle.crosses:
+        x = x0 + (cc + 1) * cell_size
+        y = y0 + (puzzle.rows - cr - 1) * cell_size
+        c.circle(x, y, dot_r, stroke=0, fill=1)
+    # Cell numbers
+    font_size = min(cell_size * 0.5, 18)
+    c.setFont("Helvetica-Bold", font_size)
+    for row, col, val in puzzle.clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if val >= 0:
+            c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+
+
+def render_kakuro(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    font_size = min(cell_size * 0.32, 12)
+    for row, col, across, down in puzzle.clue_cells:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        # Black filled cell with diagonal line (top-left to bottom-right)
+        c.setFillColorRGB(0, 0, 0)
+        c.rect(cx - cell_size / 2, cy - cell_size / 2,
+               cell_size, cell_size, stroke=0, fill=1)
+        c.setStrokeColorRGB(1, 1, 1)
+        c.setLineWidth(1.0)
+        c.line(cx - cell_size / 2, cy + cell_size / 2,
+               cx + cell_size / 2, cy - cell_size / 2)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("Helvetica-Bold", font_size)
+        if across > 0:
+            # Top-right triangle: across (sum to the right)
+            c.drawRightString(cx + cell_size * 0.42, cy + cell_size * 0.18, str(across))
+        if down > 0:
+            # Bottom-left triangle: down (sum below)
+            c.drawString(cx - cell_size * 0.42, cy - cell_size * 0.42 + 1, str(down))
+
+
 def render_wagiri(c, puzzle):
     """Wagiri: dashed grid + intersection circles (gokigen-style) + cell numbers."""
     cell_size = min((PAGE_W - 2 * MARGIN) / puzzle.cols,
@@ -1134,6 +1194,9 @@ RENDERERS = {
     KinkonkanPuzzle: render_kinkonkan,
     ShwolfPuzzle: render_shwolf,
     WagiriPuzzle: render_wagiri,
+    CbblockPuzzle: render_cbblock,
+    BdblockPuzzle: render_bdblock,
+    KakuroPuzzle: render_kakuro,
     UnknownPuzzle: render_unknown,
 }
 

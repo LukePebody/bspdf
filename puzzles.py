@@ -152,6 +152,32 @@ class KinkonkanPuzzle(Puzzle):
 
 
 @dataclass
+class CbblockPuzzle(Puzzle):
+    """Color Block / Combi Block puzzle. Just region borders.
+    Encoded by bit-packing every interior border (5 bits per char).
+    """
+    vborders: list = field(default_factory=list)
+    hborders: list = field(default_factory=list)
+
+
+@dataclass
+class BdblockPuzzle(Puzzle):
+    """Border Block puzzle. Cross dots on intersections + numbers in cells."""
+    crosses: list = field(default_factory=list)         # (cross_row, cross_col)
+    clues: list = field(default_factory=list)           # (row, col, value)
+
+
+@dataclass
+class KakuroPuzzle(Puzzle):
+    """Kakuro puzzle. Each clue cell has across/down sum constraints.
+    clue_cells: list of (row, col, across, down) where across/down are sums (-1 or 0 = none).
+    edge_clues: list of ('top'/'left', idx, value) for outside-of-grid clues.
+    """
+    clue_cells: list = field(default_factory=list)
+    edge_clues: list = field(default_factory=list)
+
+
+@dataclass
 class WagiriPuzzle(Puzzle):
     """Wagiri puzzle. Intersection circle clues + cell number clues.
     cross_clues: (row, col, value) on (cols+1) x (rows+1) intersection grid.
@@ -904,7 +930,7 @@ def decode_puzzle(url, title="", date=""):
         return MashuPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
                           title=title, date=date, url=url, clues=clues)
     elif puzzle_type in ("shikaku", "kurotto", "chainedb",
-                          "hashi", "kurodoko", "mochikoro"):
+                          "hashi", "kurodoko", "mochikoro", "tasquare"):
         entries, _ = decode_number16(cols * rows, data)
         clues = [(idx // cols, idx % cols, val) for idx, val in entries]
         return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
@@ -965,6 +991,96 @@ def decode_puzzle(url, title="", date=""):
         return RegionPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
                            title=title, date=date, url=url,
                            vborders=vborders, hborders=hborders, clues=clues)
+    elif puzzle_type == "cbblock":
+        # All interior borders bit-packed (5 bits per char). Border indexing in
+        # pzprjs places vertical borders first (rows*(cols-1)) then horizontal
+        # (cols*(rows-1)).
+        n_vbits = rows * (cols - 1)
+        n_hbits = (rows - 1) * cols
+        total_bits = n_vbits + n_hbits
+        twi = [16, 8, 4, 2, 1]
+        bits = []
+        n_chars = (total_bits + 4) // 5
+        for ch in data[:n_chars]:
+            try:
+                v = int(ch, 32)
+            except ValueError:
+                v = 0
+            for w in range(5):
+                bits.append(1 if v & twi[w] else 0)
+        vborders = []
+        hborders = []
+        for i in range(n_vbits):
+            if bits[i]:
+                vborders.append((i // (cols - 1), i % (cols - 1)))
+        for i in range(n_hbits):
+            if bits[n_vbits + i]:
+                hborders.append((i // cols, i % cols))
+        return CbblockPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                            title=title, date=date, url=url,
+                            vborders=vborders, hborders=hborders)
+    elif puzzle_type == "bdblock":
+        # decodeCrossMark on (cols-1)*(rows-1) interior intersections,
+        # then a leading '/' (literal divider) then decodeNumber16 for cells.
+        cross_cols = cols - 1
+        cross_rows = rows - 1
+        n_cross = cross_cols * cross_rows
+        crosses = []
+        cc = 0
+        i = 0
+        while i < len(data) and cc < n_cross:
+            ca = data[i]
+            if "0" <= ca <= "9" or "a" <= ca <= "z":
+                cc += int(ca, 36)
+                if cc < n_cross:
+                    crosses.append((cc // cross_cols, cc % cross_cols))
+                cc += 1
+            elif ca == ".":
+                cc += 35
+            i += 1
+        rest = data[i:]
+        if rest.startswith("/"):
+            rest = rest[1:]
+        entries, _ = decode_number16(cols * rows, rest)
+        clues = [(idx // cols, idx % cols, val) for idx, val in entries]
+        return BdblockPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                            title=title, date=date, url=url,
+                            crosses=crosses, clues=clues)
+    elif puzzle_type == "kakuro":
+        # Kakuro: cells alternate between "clue" cells (ques=51) with two values
+        # and "open" cells. Skip is k-z. '.' is empty clue cell. Other chars are
+        # the first of a 2-char value pair (across, down) using base-45 alphabet.
+        def _kdecval(ca):
+            if "0" <= ca <= "9":
+                return int(ca, 10)
+            if "a" <= ca <= "j":
+                return int(ca, 36)            # 10..19
+            if "A" <= ca <= "Z":
+                return int(ca, 36) + 10       # 20..45
+            return -1
+        clue_cells = []
+        c_pos = 0
+        i = 0
+        total = cols * rows
+        while i < len(data) and c_pos < total:
+            ca = data[i]
+            if "k" <= ca <= "z":
+                c_pos += int(ca, 36) - 19 + 1
+                i += 1
+            elif ca == ".":
+                clue_cells.append((c_pos // cols, c_pos % cols, -1, -1))
+                c_pos += 1
+                i += 1
+            else:
+                across = _kdecval(ca)
+                down = _kdecval(data[i + 1]) if i + 1 < len(data) else -1
+                clue_cells.append((c_pos // cols, c_pos % cols, across, down))
+                c_pos += 1
+                i += 2
+        # Outside numbers follow but are uncommon; skip to keep decoder simple.
+        return KakuroPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           clue_cells=clue_cells, edge_clues=[])
     elif puzzle_type == "wagiri":
         # decode4Cross on (cols+1)*(rows+1) intersections, then decodeNumber10 in cells.
         n_cross = (cols + 1) * (rows + 1)
