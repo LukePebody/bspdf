@@ -5,7 +5,7 @@ import argparse
 import sys
 
 from scraper import fetch_month
-from puzzles import decode_puzzle
+from puzzles import decode_puzzle, UnknownPuzzle
 from renderer import render_pdf
 
 
@@ -35,14 +35,24 @@ def main():
         sys.exit(0)
 
     puzzles = []
+    unknown_types = {}
     for date, title, url, stars in posts:
         puzzle = decode_puzzle(url, title=title, date=date)
         puzzle.stars = stars
         puzzles.append(puzzle)
         status = puzzle.puzzle_type
-        if hasattr(puzzle, 'clues'):
+        if isinstance(puzzle, UnknownPuzzle):
+            status += " [UNKNOWN]"
+            unknown_types.setdefault(puzzle.puzzle_type, 0)
+            unknown_types[puzzle.puzzle_type] += 1
+        elif hasattr(puzzle, 'clues'):
             status += f" ({len(puzzle.clues)} clues)"
         print(f"  {date} | {title} | {status}")
+
+    if unknown_types:
+        summary = ", ".join(f"{t} (x{n})" if n > 1 else t
+                            for t, n in sorted(unknown_types.items()))
+        print(f"Unknown puzzle types: {summary}")
 
     render_pdf(puzzles, output, year=year, month=month)
 

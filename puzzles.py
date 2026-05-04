@@ -189,14 +189,21 @@ def decode_icebarn(cols, rows, data_str):
 
 
 def decode_ringring(cols, rows, data):
-    """Decode ring ring puzzle. Each character = skip val gaps then place a block.
-    Blocks are marked cells with no value. Returns list of (row, col)."""
+    """Decode ring ring puzzle. Base-36 char (0-9, a-z) = skip val cells then place block.
+    '.' = skip 36 cells with no block. Returns list of (row, col)."""
     blocks = []
     ptr = 0
+    total = rows * cols
     for ch in data:
-        val = CHARS.index(ch)
+        if ptr >= total:
+            break
+        if ch == '.':
+            ptr += 36
+            continue
+        val = int(ch, 36)
         ptr += val
-        blocks.append((ptr // cols, ptr % cols))
+        if ptr < total:
+            blocks.append((ptr // cols, ptr % cols))
         ptr += 1
     return blocks
 
