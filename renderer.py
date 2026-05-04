@@ -10,7 +10,12 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from puzzles import NurikabePuzzle, IceBarnPuzzle, RegionPuzzle, RegionArrowPuzzle, DbchocoPuzzle, MidloopPuzzle, PipelinkPuzzle, FireflyPuzzle, UnknownPuzzle
+from puzzles import (
+    NurikabePuzzle, IceBarnPuzzle, RegionPuzzle, RegionArrowPuzzle, DbchocoPuzzle,
+    MidloopPuzzle, PipelinkPuzzle, FireflyPuzzle, UnknownPuzzle,
+    MashuPuzzle, SimpleLoopPuzzle, StarBattlePuzzle, IcelomPuzzle, BarnsPuzzle,
+    ReflectPuzzle, SlalomPuzzle, KinkonkanPuzzle, ShwolfPuzzle,
+)
 
 # Register Japanese font
 _JP_FONT = "DroidSansFallback"
@@ -60,6 +65,10 @@ ENGLISH_NAMES = {
     "shikaku": "Shikaku",
     "bdblock": "Border Block",
     "lightup": "Akari",
+    "akari": "Akari",
+    "icelom": "Icelom",
+    "icelom2": "Icelom 2",
+    "slalom": "Slalom",
     "shugaku": "School Trip",
     "ayeheya": "Aye-Heya",
     "yajikazu": "Yajikazu",
@@ -190,9 +199,12 @@ def render_nurikabe(c, puzzle):
     elif puzzle.puzzle_type != "slither":
         _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
 
-    is_shakashaka = puzzle.puzzle_type in ("shakashaka", "ringring")
+    is_shakashaka = puzzle.puzzle_type in ("shakashaka", "ringring", "akari")
     is_tapa = puzzle.puzzle_type == "tapa"
     is_slither = puzzle.puzzle_type == "slither"
+    is_kurotto = puzzle.puzzle_type == "kurotto"
+    is_chainedb = puzzle.puzzle_type == "chainedb"
+    is_shugaku = puzzle.puzzle_type == "shugaku"
 
     is_gokigen = puzzle.puzzle_type == "gokigen"
 
@@ -247,7 +259,26 @@ def render_nurikabe(c, puzzle):
 
     for row, col, val in puzzle.clues:
         cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
-        if is_shakashaka:
+        if is_kurotto:
+            # White circle, with optional number; -2 = empty circle
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setLineWidth(1.5)
+            c.circle(cx, cy, cell_size * 0.35, stroke=1, fill=1)
+            if val >= 0:
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+        elif is_chainedb:
+            # Grey background cell with optional number; -2 = empty grey cell
+            c.setFillColorRGB(0.7, 0.7, 0.7)
+            c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                   cell_size, cell_size, stroke=0, fill=1)
+            if val >= 0:
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+        elif is_shakashaka:
             # Draw black cell
             c.setFillColorRGB(0, 0, 0)
             c.rect(cx - cell_size / 2, cy - cell_size / 2,
@@ -289,6 +320,11 @@ def render_nurikabe(c, puzzle):
                 c.drawCentredString(cx + off, cy + off - fs * 0.3, lines[1])
                 c.drawCentredString(cx - off, cy - off - fs * 0.3, lines[2])
                 c.drawCentredString(cx + off, cy - off - fs * 0.3, lines[3])
+        elif is_shugaku:
+            # Render -2 as "?" (pillow without count) and others as the number.
+            text = "?" if val == -2 else str(val)
+            c.setFont("Helvetica-Bold", font_size)
+            c.drawCentredString(cx, cy - font_size * 0.3, text)
         else:
             c.setFont("Helvetica-Bold", font_size)
             c.drawCentredString(cx, cy - font_size * 0.3, str(val))
@@ -558,7 +594,7 @@ def render_pipelink(c, puzzle):
 
 def render_firefly(c, puzzle):
     """Render Hotaru Beam or Yajilin. Both have direction+number clues."""
-    is_yajilin = puzzle.puzzle_type in ("yajirin", "hebi")
+    is_yajilin = puzzle.puzzle_type in ("yajirin", "hebi", "yajikazu")
     is_sashigane = puzzle.puzzle_type == "sashigane"
 
     if is_sashigane:
@@ -719,6 +755,275 @@ def render_firefly(c, puzzle):
                    cx + dx * (radius + tail_len), cy + dy * (radius + tail_len))
 
 
+def _draw_region_borders(c, puzzle, cell_size, x0, y0, thin_dashed=False):
+    """Draw region borders (thick) and inner grid (thin)."""
+    if thin_dashed:
+        c.setStrokeColorRGB(0.5, 0.5, 0.5)
+        c.setLineWidth(0.5)
+        c.setDash(3, 3)
+    else:
+        c.setStrokeColorRGB(0.7, 0.7, 0.7)
+        c.setLineWidth(0.5)
+    for i in range(puzzle.rows + 1):
+        y = y0 + i * cell_size
+        c.line(x0, y, x0 + puzzle.cols * cell_size, y)
+    for j in range(puzzle.cols + 1):
+        x = x0 + j * cell_size
+        c.line(x, y0, x, y0 + puzzle.rows * cell_size)
+    if thin_dashed:
+        c.setDash()
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(2.5)
+    c.rect(x0, y0, puzzle.cols * cell_size, puzzle.rows * cell_size, stroke=1, fill=0)
+    for row, col in puzzle.vborders:
+        x = x0 + (col + 1) * cell_size
+        y_top = y0 + (puzzle.rows - row) * cell_size
+        c.line(x, y_top - cell_size, x, y_top)
+    for row, col in puzzle.hborders:
+        y = y0 + (puzzle.rows - row - 1) * cell_size
+        c.line(x0 + col * cell_size, y, x0 + (col + 1) * cell_size, y)
+
+
+def render_mashu(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    radius = cell_size * 0.32
+    for row, col, val in puzzle.clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if val == 1:  # white circle
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setLineWidth(1.8)
+            c.circle(cx, cy, radius, stroke=1, fill=1)
+        elif val == 2:  # black circle
+            c.setFillColorRGB(0, 0, 0)
+            c.circle(cx, cy, radius, stroke=0, fill=1)
+
+
+def render_simpleloop(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    c.setFillColorRGB(0, 0, 0)
+    for row, col in puzzle.blocked_cells:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        c.rect(cx - cell_size / 2, cy - cell_size / 2,
+               cell_size, cell_size, stroke=0, fill=1)
+
+
+def render_starbattle(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_region_borders(c, puzzle, cell_size, x0, y0)
+    # Annotate the star count beneath the header
+    c.setFont("Helvetica", 11)
+    c.setFillColorRGB(0, 0, 0)
+    label = f"{puzzle.star_count} star" + ("s" if puzzle.star_count != 1 else "")
+    c.drawString(MARGIN, PAGE_H - MARGIN - 30, f"({label} per row, column, and region)")
+
+
+def render_icelom(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    # Ice cells (light blue)
+    c.setFillColorRGB(0.8, 0.9, 1.0)
+    for row, col in puzzle.ice:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        c.rect(cx - cell_size / 2, cy - cell_size / 2,
+               cell_size, cell_size, stroke=0, fill=1)
+    c.setFillColorRGB(0, 0, 0)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    # Numbers in cells
+    font_size = min(cell_size * 0.6, 20)
+    c.setFont("Helvetica-Bold", font_size)
+    for row, col, val in puzzle.clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+    # In/out arrows on the perimeter
+    arrow_size = cell_size * 0.3
+    for arrow_val, atype in [(puzzle.in_arrow, "in"), (puzzle.out_arrow, "out")]:
+        cols, rows = puzzle.cols, puzzle.rows
+        if arrow_val < cols:
+            row, col, dr, dc = (-1 if atype == "in" else 0, arrow_val,
+                                1 if atype == "in" else -1, 0)
+        elif arrow_val < 2 * cols:
+            row, col, dr, dc = (rows if atype == "in" else rows - 1, arrow_val - cols,
+                                -1 if atype == "in" else 1, 0)
+        elif arrow_val < 2 * cols + rows:
+            row, col, dr, dc = (arrow_val - 2 * cols, -1 if atype == "in" else 0,
+                                0, 1 if atype == "in" else -1)
+        else:
+            row, col, dr, dc = (arrow_val - 2 * cols - rows, cols if atype == "in" else cols - 1,
+                                0, -1 if atype == "in" else 1)
+        cx = x0 + (col + 0.5) * cell_size + (dc * cell_size * 0.5 if atype == "in" else 0)
+        cy = y0 + (rows - row - 0.5) * cell_size - (dr * cell_size * 0.5 if atype == "in" else 0)
+        if atype != "in":
+            cx = x0 + (col + 0.5) * cell_size + dc * cell_size * 0.5
+            cy = y0 + (rows - row - 0.5) * cell_size - dr * cell_size * 0.5
+        _draw_arrow(c, cx, cy, dr, dc, arrow_size)
+
+
+def render_barns(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    # Ice cells background
+    c.setFillColorRGB(0.8, 0.9, 1.0)
+    for row, col in puzzle.ice:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        c.rect(cx - cell_size / 2, cy - cell_size / 2,
+               cell_size, cell_size, stroke=0, fill=1)
+    c.setFillColorRGB(0, 0, 0)
+    _draw_region_borders(c, puzzle, cell_size, x0, y0)
+
+
+def render_reflect(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    font_size = min(cell_size * 0.45, 14)
+    for row, col, ques, val in puzzle.cells:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if ques == 0:
+            # Block: solid black square
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                   cell_size, cell_size, stroke=0, fill=1)
+            continue
+        # Mirror: triangle filling half the cell
+        x = cx - cell_size / 2
+        y = cy - cell_size / 2
+        s = cell_size
+        c.setFillColorRGB(0, 0, 0)
+        p = c.beginPath()
+        if ques == 2:  # ◣ bottom-left triangle
+            p.moveTo(x, y); p.lineTo(x + s, y); p.lineTo(x, y + s)
+        elif ques == 3:  # ◢ bottom-right triangle
+            p.moveTo(x + s, y); p.lineTo(x + s, y + s); p.lineTo(x, y)
+        elif ques == 4:  # ◤ top-left triangle
+            p.moveTo(x, y + s); p.lineTo(x, y); p.lineTo(x + s, y + s)
+        elif ques == 5:  # ◥ top-right triangle
+            p.moveTo(x + s, y + s); p.lineTo(x, y + s); p.lineTo(x + s, y)
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+        # Number in the white half if present
+        if val >= 0:
+            # Place number in opposite corner from filled triangle
+            off = cell_size * 0.28
+            if ques == 2:
+                tx, ty = cx + off, cy + off
+            elif ques == 3:
+                tx, ty = cx - off, cy + off
+            elif ques == 4:
+                tx, ty = cx + off, cy - off
+            else:  # 5
+                tx, ty = cx - off, cy - off
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Helvetica-Bold", font_size)
+            c.drawCentredString(tx, ty - font_size * 0.3, str(val))
+
+
+def render_slalom(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    font_size = min(cell_size * 0.4, 14)
+    bar_w = cell_size * 0.18
+    for entry in puzzle.cells:
+        row, col, kind, num = entry
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if kind == "block":
+            # Black filled cell with optional white number
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                   cell_size, cell_size, stroke=0, fill=1)
+            if num is not None and num >= 0:
+                c.setFillColorRGB(1, 1, 1)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(num))
+        elif kind == "gate_v":
+            # Vertical gate marker: bar on the left edge of the cell
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size / 2 - bar_w / 2, cy - cell_size * 0.45,
+                   bar_w, cell_size * 0.9, stroke=0, fill=1)
+        elif kind == "gate_h":
+            # Horizontal gate marker: bar on the top edge of the cell
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size * 0.45, cy + cell_size / 2 - bar_w / 2,
+                   cell_size * 0.9, bar_w, stroke=0, fill=1)
+    # Start position: open circle in the cell
+    if puzzle.start_row >= 0:
+        cx, cy = _cell_center(puzzle.start_row, puzzle.start_col,
+                              puzzle.rows, cell_size, x0, y0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setFillColorRGB(1, 1, 1)
+        c.setLineWidth(2)
+        c.circle(cx, cy, cell_size * 0.32, stroke=1, fill=1)
+
+
+def render_kinkonkan(c, puzzle):
+    # Allocate margin around grid for edge clues
+    available_w = PAGE_W - 2 * MARGIN
+    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT
+    # Reserve 1.2 cells worth of space on each side for the clues
+    cell_size = min(available_w / (puzzle.cols + 2.4), available_h / (puzzle.rows + 2.4))
+    grid_w = cell_size * puzzle.cols
+    grid_h = cell_size * puzzle.rows
+    x0 = MARGIN + (available_w - grid_w) / 2
+    y_top = PAGE_H - MARGIN - HEADER_HEIGHT
+    y0 = y_top - (available_h - grid_h) / 2 - grid_h
+    _draw_region_borders(c, puzzle, cell_size, x0, y0)
+    # Edge clues: letter + number
+    font_size = min(cell_size * 0.32, 12)
+    c.setFont("Helvetica-Bold", font_size)
+    c.setFillColorRGB(0, 0, 0)
+    for side, idx, letter_idx, val in puzzle.edge_clues:
+        # Convert letter_idx (1-based) to letter sequence: 1=A, 2=B, ..., 26=Z, 27=AA, etc.
+        letter = ""
+        n = letter_idx
+        while n > 0:
+            n -= 1
+            letter = chr(ord('A') + (n % 26)) + letter
+            n //= 26
+        num_text = "?" if val == -2 else str(val)
+        text = f"{letter}{num_text}"
+        if side == "top":
+            tx = x0 + (idx + 0.5) * cell_size
+            ty = y0 + grid_h + cell_size * 0.4
+        elif side == "bottom":
+            tx = x0 + (idx + 0.5) * cell_size
+            ty = y0 - cell_size * 0.7
+        elif side == "left":
+            tx = x0 - cell_size * 0.6
+            ty = y0 + (puzzle.rows - idx - 0.5) * cell_size - font_size * 0.3
+        else:  # right
+            tx = x0 + grid_w + cell_size * 0.6
+            ty = y0 + (puzzle.rows - idx - 0.5) * cell_size - font_size * 0.3
+        if side in ("top", "bottom"):
+            c.drawCentredString(tx, ty, text)
+        else:
+            c.drawCentredString(tx, ty, text)
+
+
+def render_shwolf(c, puzzle):
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    # Cross dots on intersections
+    dot_r = cell_size * 0.1
+    c.setFillColorRGB(0, 0, 0)
+    for cr, cc in puzzle.crosses:
+        # cr in [0, rows-2], cc in [0, cols-2] — interior intersection
+        x = x0 + (cc + 1) * cell_size
+        y = y0 + (puzzle.rows - cr - 1) * cell_size
+        c.circle(x, y, dot_r, stroke=0, fill=1)
+    # Circles in cells: 1 = white (sheep), 2 = black (wolf)
+    radius = cell_size * 0.3
+    for row, col, val in puzzle.circles:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if val == 1:
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setLineWidth(1.5)
+            c.circle(cx, cy, radius, stroke=1, fill=1)
+        elif val == 2:
+            c.setFillColorRGB(0, 0, 0)
+            c.circle(cx, cy, radius, stroke=0, fill=1)
+
+
 def render_unknown(c, puzzle):
     """Render a placeholder page for unsupported puzzle types."""
     c.setFont("Helvetica", 24)
@@ -741,6 +1046,15 @@ RENDERERS = {
     MidloopPuzzle: render_midloop,
     PipelinkPuzzle: render_pipelink,
     FireflyPuzzle: render_firefly,
+    MashuPuzzle: render_mashu,
+    SimpleLoopPuzzle: render_simpleloop,
+    StarBattlePuzzle: render_starbattle,
+    IcelomPuzzle: render_icelom,
+    BarnsPuzzle: render_barns,
+    ReflectPuzzle: render_reflect,
+    SlalomPuzzle: render_slalom,
+    KinkonkanPuzzle: render_kinkonkan,
+    ShwolfPuzzle: render_shwolf,
     UnknownPuzzle: render_unknown,
 }
 

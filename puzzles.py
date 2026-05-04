@@ -76,14 +76,100 @@ class DbchocoPuzzle(Puzzle):
 
 
 @dataclass
+class MashuPuzzle(Puzzle):
+    """Masyu puzzle. Each clue is (row, col, value): 1=white circle, 2=black circle."""
+    clues: list = field(default_factory=list)
+
+
+@dataclass
+class SimpleLoopPuzzle(Puzzle):
+    """Simple Loop puzzle. blocked_cells are (row, col) where the loop cannot enter."""
+    blocked_cells: list = field(default_factory=list)
+
+
+@dataclass
+class StarBattlePuzzle(Puzzle):
+    """Star Battle puzzle. Regions + star count."""
+    vborders: list = field(default_factory=list)
+    hborders: list = field(default_factory=list)
+    star_count: int = 1
+
+
+@dataclass
+class IcelomPuzzle(Puzzle):
+    """Icelom puzzle. Ice cells + number clues + in/out arrows."""
+    ice: list = field(default_factory=list)
+    clues: list = field(default_factory=list)         # list of (row, col, value)
+    in_arrow: int = 0
+    out_arrow: int = 0
+
+
+@dataclass
+class BarnsPuzzle(Puzzle):
+    """Barns puzzle. Ice cells + region borders."""
+    ice: list = field(default_factory=list)
+    vborders: list = field(default_factory=list)
+    hborders: list = field(default_factory=list)
+
+
+@dataclass
+class ReflectPuzzle(Puzzle):
+    """Reflect Link puzzle. Cells with mirrors and blocks.
+    cells: list of (row, col, mirror_type, value)
+    mirror_type: 0=block, 2=◣, 3=◢, 4=◤, 5=◥
+    value: -1 for "no number".
+    """
+    cells: list = field(default_factory=list)
+
+
+@dataclass
+class SlalomPuzzle(Puzzle):
+    """Slalom puzzle. Block cells + horizontal/vertical gate markers + a start position.
+    cells: list of (row, col, kind, number) where:
+      kind = 'block' (a numbered black cell)
+      kind = 'gate_v' (vertical gate marker on the left edge of the cell)
+      kind = 'gate_h' (horizontal gate marker on the top edge of the cell)
+    number: integer label or None.
+    start_row, start_col: position of the start marker (open circle).
+    """
+    cells: list = field(default_factory=list)
+    start_row: int = -1
+    start_col: int = -1
+
+
+@dataclass
+class KinkonkanPuzzle(Puzzle):
+    """Kin-Kon-Kan puzzle. Region borders + edge clues with letter+number pairs.
+    edge_clues: list of (side, idx, letter_idx, value) where
+      side is 'top'/'bottom'/'left'/'right'
+      idx is the column or row index along that side (0-indexed)
+      letter_idx is the alphabetical letter index (1-based: 1='A', 2='B', ...)
+      value is the number (-2 if just '.')
+    """
+    vborders: list = field(default_factory=list)
+    hborders: list = field(default_factory=list)
+    edge_clues: list = field(default_factory=list)
+
+
+@dataclass
+class ShwolfPuzzle(Puzzle):
+    """Goats and Wolves puzzle. Cross dots + circles in cells.
+    crosses: list of (row, col) — interior intersection (1..rows-1, 1..cols-1)
+    circles: list of (row, col, value) where value 1 or 2 (sheep/wolf)
+    """
+    crosses: list = field(default_factory=list)
+    circles: list = field(default_factory=list)
+
+
+@dataclass
 class UnknownPuzzle(Puzzle):
     """Placeholder for puzzle types we haven't implemented decoders for yet."""
     pass
 
 
 def parse_url(url):
-    """Extract puzzle_type, cols, rows, data from a puzz.link or pzv.jp URL."""
-    # Normalize URL to just the query part
+    """Extract puzzle_type, cols, rows, data from a puzz.link or pzv.jp URL.
+    Some puzzles have a variant flag (single letter) before cols/rows; we skip it."""
     match = re.search(r'[?&]([^&]+)', url)
     if not match:
         return None, None, None, None
@@ -92,12 +178,18 @@ def parse_url(url):
     if len(parts) < 3:
         return None, None, None, None
     puzzle_type = parts[0]
+    idx = 1
+    # Skip variant flag if parts[1] isn't an int (e.g. slalom/d/10/10/, icelom/a/8/8/)
+    if not parts[idx].isdigit():
+        idx += 1
+        if len(parts) < idx + 2:
+            return None, None, None, None
     try:
-        cols = int(parts[1])
-        rows = int(parts[2])
+        cols = int(parts[idx])
+        rows = int(parts[idx + 1])
     except ValueError:
         return None, None, None, None
-    data = "/".join(parts[3:]) if len(parts) > 3 else ""
+    data = "/".join(parts[idx + 2:]) if len(parts) > idx + 2 else ""
     return puzzle_type, cols, rows, data
 
 
@@ -512,6 +604,145 @@ def decode_regions_usoone(cols, rows, data):
     return vborders, hborders, clues
 
 
+def _read_number16(data, i):
+    """Read one Number16 entry from data starting at i.
+    Returns (value, consumed_chars). value=-1 if no value (skip char). value=-2 for '.'."""
+    if i >= len(data):
+        return -1, 0
+    ca = data[i]
+    if ca in "0123456789abcdef":
+        return int(ca, 16), 1
+    if ca == "-":
+        return int(data[i + 1:i + 3], 16), 3
+    if ca == "+":
+        return int(data[i + 1:i + 4], 16), 4
+    if ca == "=":
+        return int(data[i + 1:i + 4], 16) + 4096, 4
+    if ca == "%" or ca == "@":
+        return int(data[i + 1:i + 4], 16) + 8192, 4
+    if ca == "*":
+        return int(data[i + 1:i + 5], 16) + 12240, 5
+    if ca == "$":
+        return int(data[i + 1:i + 6], 16) + 77776, 6
+    if ca == ".":
+        return -2, 1
+    return -1, 0
+
+
+def decode_number16(length, data):
+    """Decode Number16-encoded data. Returns (list_of_(idx, value), consumed_chars).
+    Each entry is a single integer value at a 0-indexed position in the cell array.
+    """
+    entries = []
+    c = 0
+    i = 0
+    while i < len(data) and c < length:
+        ca = data[i]
+        val, consumed = _read_number16(data, i)
+        if val != -1:
+            entries.append((c, val))
+            i += consumed
+            c += 1
+        elif "g" <= ca <= "z":
+            c += int(ca, 36) - 15
+            i += 1
+        else:
+            i += 1
+    return entries, i
+
+
+def decode_arrow_number16(length, data):
+    """Decode arrow+number data (used by yajilin/yajikazu). Returns (entries, consumed).
+    Each entry is (idx, qdir, qnum). qdir 0-4. qnum -2 for '.', -3 for '+' (no arrow black)."""
+    entries = []
+    c = 0
+    i = 0
+    while i < len(data) and c < length:
+        ca = data[i]
+        if ca == "+":
+            entries.append((c, 0, -3))
+            i += 1
+            c += 1
+        elif "0" <= ca <= "4":
+            qdir = int(ca, 16)
+            ca1 = data[i + 1] if i + 1 < len(data) else ""
+            qnum = int(ca1, 16) if ca1 != "." else -2
+            entries.append((c, qdir, qnum))
+            i += 2
+            c += 1
+        elif "5" <= ca <= "9":
+            qdir = int(ca, 16) - 5
+            qnum = int(data[i + 1:i + 3], 16)
+            entries.append((c, qdir, qnum))
+            i += 3
+            c += 1
+        elif ca == "-":
+            qdir = int(data[i + 1], 16)
+            qnum = int(data[i + 2:i + 5], 16)
+            entries.append((c, qdir, qnum))
+            i += 5
+            c += 1
+        elif "a" <= ca <= "z":
+            c += int(ca, 36) - 10
+            i += 1
+            c += 1
+        else:
+            i += 1
+    return entries, i
+
+
+def decode_binary(length, data):
+    """Decode bit-packed binary data: 5 bits per char (base 32).
+    Returns (list_of_indices_set, consumed_chars)."""
+    indices = []
+    c = 0
+    twi = [16, 8, 4, 2, 1]
+    i = 0
+    while i < len(data) and c < length:
+        num = int(data[i], 32)
+        for w in range(5):
+            if c < length:
+                if num & twi[w]:
+                    indices.append(c)
+                c += 1
+        i += 1
+    return indices, i
+
+
+def decode_triple(length, data):
+    """Decode base-27 triple-encoded data (3 cells per char, value 0-2).
+    Returns (list_of_(idx, val), consumed_chars). Only nonzero values returned."""
+    entries = []
+    c = 0
+    tri = [9, 3, 1]
+    pos = min((length + 2) // 3, len(data))
+    for i in range(pos):
+        ca = int(data[i], 27)
+        for w in range(3):
+            val = (ca // tri[w]) % 3
+            if val > 0 and c < length:
+                entries.append((c, val))
+            c += 1
+    return entries, pos
+
+
+def decode_borders_only(cols, rows, data):
+    """Decode just the vertical and horizontal borders. Returns (vborders, hborders, consumed)."""
+    import math as _math
+    n_vbits = rows * (cols - 1)
+    n_hbits = (rows - 1) * cols
+    n_vchars = _math.ceil(n_vbits / 5)
+    n_hchars = _math.ceil(n_hbits / 5)
+    vborders, hborders, _ = decode_regions(cols, rows, data)
+    return vborders, hborders, n_vchars + n_hchars
+
+
+def _find_room_top_cells(cols, rows, vborders, hborders):
+    """Return a list of (row, col) for the top-left cell of each room, in row-major scan order."""
+    rooms = _find_rooms(cols, rows, vborders, hborders)
+    return [(r, c) for (r, c, _cells) in rooms]
+
+
 # Puzzle types that use the same "numbers in cells" encoding as nurikabe
 NUMBERS_IN_CELLS_TYPES = {"nurikabe", "fillomino", "hitori", "numlin", "bag"}
 
@@ -652,6 +883,311 @@ def decode_puzzle(url, title="", date=""):
                             title=title, date=date, url=url,
                             ice=ice, arrows=arrows,
                             in_arrow=in_arrow, out_arrow=out_arrow)
+    elif puzzle_type == "mashu":
+        entries, _ = decode_triple(cols * rows, data)
+        clues = [(idx // cols, idx % cols, val) for idx, val in entries]
+        return MashuPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                          title=title, date=date, url=url, clues=clues)
+    elif puzzle_type in ("shikaku", "kurotto", "chainedb"):
+        entries, _ = decode_number16(cols * rows, data)
+        clues = [(idx // cols, idx % cols, val) for idx, val in entries]
+        return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                             title=title, date=date, url=url, clues=clues)
+    elif puzzle_type in ("akari", "lightup"):
+        clues = decode_usoone_clues(cols, rows, data, support_dot=True)
+        return NurikabePuzzle(puzzle_type="akari", cols=cols, rows=rows,
+                             title=title, date=date, url=url, clues=clues)
+    elif puzzle_type == "shugaku":
+        clues = []
+        c = 0
+        i = 0
+        total = cols * rows
+        while i < len(data) and c < total:
+            ca = data[i]
+            if "0" <= ca <= "4":
+                clues.append((c // cols, c % cols, int(ca)))
+                c += 1
+            elif ca == "5":
+                clues.append((c // cols, c % cols, -2))
+                c += 1
+            else:
+                c += int(ca, 36) - 6 + 1
+            i += 1
+        return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                             title=title, date=date, url=url, clues=clues)
+    elif puzzle_type == "simpleloop":
+        blocked, _ = decode_binary(cols * rows, data)
+        cells = [(idx // cols, idx % cols) for idx in blocked]
+        return SimpleLoopPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                               title=title, date=date, url=url, blocked_cells=cells)
+    elif puzzle_type == "starbattle":
+        parts = data.split("/")
+        star_count = int(parts[0]) if parts and parts[0].isdigit() else 1
+        border_data = "/".join(parts[1:])
+        vborders, hborders, _ = decode_regions(cols, rows, border_data)
+        return StarBattlePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                               title=title, date=date, url=url,
+                               vborders=vborders, hborders=hborders,
+                               star_count=star_count)
+    elif puzzle_type == "ayeheya":
+        vborders, hborders, clues = decode_regions_roomclues(cols, rows, data)
+        return RegionPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           vborders=vborders, hborders=hborders, clues=clues)
+    elif puzzle_type == "cocktail":
+        vborders, hborders, consumed = decode_borders_only(cols, rows, data)
+        room_tops = _find_room_top_cells(cols, rows, vborders, hborders)
+        entries, _ = decode_number16(len(room_tops), data[consumed:])
+        clues = []
+        for idx, val in entries:
+            r, c = room_tops[idx]
+            clues.append((r, c, val))
+        return RegionPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           vborders=vborders, hborders=hborders, clues=clues)
+    elif puzzle_type == "yajilin-regions":
+        vborders, hborders, consumed = decode_borders_only(cols, rows, data)
+        room_tops = _find_room_top_cells(cols, rows, vborders, hborders)
+        entries, _ = decode_number16(len(room_tops), data[consumed:])
+        clues = []
+        for idx, val in entries:
+            r, c = room_tops[idx]
+            clues.append((r, c, val))
+        return RegionPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           vborders=vborders, hborders=hborders, clues=clues)
+    elif puzzle_type == "yajikazu":
+        entries, _ = decode_arrow_number16(cols * rows, data)
+        clues = []
+        for idx, qdir, qnum in entries:
+            r, c = idx // cols, idx % cols
+            if qnum == -3:
+                # '+': black square no arrow
+                clues.append((r, c, 0, None))
+            else:
+                val = None if qnum == -2 else qnum
+                clues.append((r, c, qdir, val))
+        return FireflyPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                            title=title, date=date, url=url, clues=clues)
+    elif puzzle_type in ("icelom", "icelom2"):
+        # decodeIce (binary) then decodeNumber16 then '/in/out'
+        ice_idx, consumed = decode_binary(cols * rows, data)
+        ice = [(idx // cols, idx % cols) for idx in ice_idx]
+        rest = data[consumed:]
+        entries, n_consumed = decode_number16(cols * rows, rest)
+        clues = [(idx // cols, idx % cols, val) for idx, val in entries]
+        # Remaining: /in/out
+        tail = rest[n_consumed:]
+        in_arrow = out_arrow = 0
+        if tail.startswith("/"):
+            parts = tail[1:].split("/")
+            if len(parts) >= 1 and parts[0].isdigit():
+                in_arrow = int(parts[0])
+            if len(parts) >= 2 and parts[1].isdigit():
+                out_arrow = int(parts[1])
+        return IcelomPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           ice=ice, clues=clues,
+                           in_arrow=in_arrow, out_arrow=out_arrow)
+    elif puzzle_type == "barns":
+        # decodeBarns (binary 5-bits) then decodeBorder
+        ice_idx, consumed = decode_binary(cols * rows, data)
+        ice = [(idx // cols, idx % cols) for idx in ice_idx]
+        vborders, hborders, _ = decode_regions(cols, rows, data[consumed:])
+        return BarnsPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                          title=title, date=date, url=url,
+                          ice=ice, vborders=vborders, hborders=hborders)
+    elif puzzle_type == "reflect":
+        cells = []
+        c = 0
+        i = 0
+        total = cols * rows
+        while i < len(data) and c < total:
+            ca = data[i]
+            if ca == "5":
+                cells.append((c // cols, c % cols, 0, -1))  # block
+                c += 1
+                i += 1
+            elif "1" <= ca <= "4":
+                ques = int(ca) + 1  # 2-5
+                qnum = int(data[i + 1], 16)
+                if qnum == 0:
+                    qnum = -1
+                cells.append((c // cols, c % cols, ques, qnum))
+                c += 1
+                i += 2
+            elif "6" <= ca <= "9":
+                ques = int(ca) - 4  # 2-5
+                qnum = int(data[i + 1:i + 3], 16)
+                if qnum == 0:
+                    qnum = -1
+                cells.append((c // cols, c % cols, ques, qnum))
+                c += 1
+                i += 3
+            elif "a" <= ca <= "z":
+                c += int(ca, 36) - 10 + 1
+                i += 1
+            else:
+                i += 1
+        return ReflectPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                            title=title, date=date, url=url, cells=cells)
+    elif puzzle_type == "slalom":
+        # parse_url already strips the variant flag.
+        # Layout for the 'd' variant: <cell_types_and_numbers>/<start_index>
+        parts = data.split("/")
+        body = parts[0]
+        start_index = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else -1
+        block_positions = []      # row, col for each ques=1 cell, in scan order
+        gate_cells = []           # (row, col, 'gate_h'|'gate_v')
+        c = 0
+        i = 0
+        total = cols * rows
+        while i < len(body) and c < total:
+            ca = body[i]
+            if ca == "1":
+                block_positions.append((c // cols, c % cols))
+                c += 1
+                i += 1
+            elif ca == "2":
+                # ques=21 → vertical gate (vertical bar on left edge in pzprjs)
+                gate_cells.append((c // cols, c % cols, "gate_v"))
+                c += 1
+                i += 1
+            elif ca == "3":
+                gate_cells.append((c // cols, c % cols, "gate_h"))
+                c += 1
+                i += 1
+            elif "4" <= ca <= "9" or "a" <= ca <= "z":
+                c += int(ca, 36) - 4 + 1
+                i += 1
+            else:
+                i += 1
+        # Phase 2: decode numbers for the block (ques=1) cells in cell scan order.
+        # The encoder iterates all cells but only emits a value for ques=1 cells.
+        block_numbers = {}
+        bi = 0
+        while i < len(body) and bi < len(block_positions):
+            ca = body[i]
+            if ca in "0123456789abcdef":
+                block_numbers[bi] = int(ca, 16)
+                bi += 1
+                i += 1
+            elif ca == "-":
+                block_numbers[bi] = int(body[i + 1:i + 3], 16)
+                bi += 1
+                i += 3
+            elif ca == ".":
+                block_numbers[bi] = -2
+                bi += 1
+                i += 1
+            else:
+                i += 1
+        cells = []
+        for idx, (r, c_pos) in enumerate(block_positions):
+            cells.append((r, c_pos, "block", block_numbers.get(idx)))
+        for r, c_pos, kind in gate_cells:
+            cells.append((r, c_pos, kind, None))
+        sr, sc = -1, -1
+        if 0 <= start_index < total:
+            sr, sc = start_index // cols, start_index % cols
+        return SlalomPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           cells=cells, start_row=sr, start_col=sc)
+    elif puzzle_type == "kinkonkan":
+        # decodeBorder then decodeKinkonkan (excells with letter+number)
+        vborders, hborders, consumed = decode_borders_only(cols, rows, data)
+        rest = data[consumed:]
+        # excells: 4 strips around the grid (top/bottom/left/right), each cols or rows long
+        # The order in pzprjs is determined by board.excell — they are positioned at
+        # negative coordinates in the bx/by grid system. We approximate by building
+        # the 4 strips in the same scan order: top row (cols), bottom row (cols),
+        # left col (rows), right col (rows).
+        n_excell = 2 * (cols + rows)
+        # Phase 1: positions with letter codes
+        subint = []
+        ec = 0
+        i = 0
+        excell_chars = {}
+        while i < len(rest) and ec < n_excell:
+            ca = rest[i]
+            if "A" <= ca <= "Z":
+                excell_chars[ec] = int(ca, 36) - 9
+                subint.append(ec)
+                ec += 1
+                i += 1
+            elif "0" <= ca <= "9":
+                if i + 1 < len(rest):
+                    excell_chars[ec] = int(rest[i + 1], 36) - 9 + (int(ca, 10) + 1) * 26
+                    subint.append(ec)
+                    ec += 1
+                    i += 2
+                else:
+                    break
+            elif "a" <= ca <= "z":
+                ec += int(ca, 36) - 10 + 1
+                i += 1
+            else:
+                i += 1
+        # Phase 2: numbers for those positions
+        excell_nums = {}
+        ec = 0
+        while i < len(rest) and ec < len(subint):
+            ca = rest[i]
+            if ca == ".":
+                excell_nums[subint[ec]] = -2
+                i += 1
+            elif ca == "-":
+                excell_nums[subint[ec]] = int(rest[i + 1:i + 3], 16)
+                i += 3
+            else:
+                excell_nums[subint[ec]] = int(ca, 16)
+                i += 1
+            ec += 1
+        # Convert excell ids to (side, idx). Order: top (cols), bottom (cols), left (rows), right (rows).
+        edge_clues = []
+        for ec_id, letter_idx in excell_chars.items():
+            num = excell_nums.get(ec_id, -2)
+            if ec_id < cols:
+                side, idx = "top", ec_id
+            elif ec_id < 2 * cols:
+                side, idx = "bottom", ec_id - cols
+            elif ec_id < 2 * cols + rows:
+                side, idx = "left", ec_id - 2 * cols
+            else:
+                side, idx = "right", ec_id - 2 * cols - rows
+            edge_clues.append((side, idx, letter_idx, num))
+        return KinkonkanPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                              title=title, date=date, url=url,
+                              vborders=vborders, hborders=hborders,
+                              edge_clues=edge_clues)
+    elif puzzle_type == "shwolf":
+        # decodeCrossMark then decodeCircle
+        # CrossMark uses cross grid: (rows-1) x (cols-1) interior crosses
+        cross_cols = cols - 1
+        cross_rows = rows - 1
+        n_cross = cross_cols * cross_rows
+        crosses = []
+        cc = 0
+        i = 0
+        while i < len(data) and cc < n_cross:
+            ca = data[i]
+            if "0" <= ca <= "9" or "a" <= ca <= "z":
+                cc += int(ca, 36)
+                if cc < n_cross:
+                    cr = cc // cross_cols
+                    cc_col = cc % cross_cols
+                    crosses.append((cr, cc_col))
+                cc += 1
+            elif ca == ".":
+                cc += 35
+            i += 1
+        rest = data[i:]
+        # decodeCircle: triple base-27
+        entries, _ = decode_triple(cols * rows, rest)
+        circles = [(idx // cols, idx % cols, val) for idx, val in entries]
+        return ShwolfPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           crosses=crosses, circles=circles)
     else:
         return UnknownPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
                             title=title, date=date, url=url)
