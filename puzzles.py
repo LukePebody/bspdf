@@ -152,6 +152,16 @@ class KinkonkanPuzzle(Puzzle):
 
 
 @dataclass
+class WagiriPuzzle(Puzzle):
+    """Wagiri puzzle. Intersection circle clues + cell number clues.
+    cross_clues: (row, col, value) on (cols+1) x (rows+1) intersection grid.
+    cell_clues: (row, col, value) for cell numbers; -2 means '.'.
+    """
+    cross_clues: list = field(default_factory=list)
+    cell_clues: list = field(default_factory=list)
+
+
+@dataclass
 class ShwolfPuzzle(Puzzle):
     """Goats and Wolves puzzle. Cross dots + circles in cells.
     crosses: list of (row, col) — interior intersection (1..rows-1, 1..cols-1)
@@ -516,9 +526,14 @@ def decode_regions(cols, rows, data):
             col = i % cols
             hborders.append((row, col))
 
-    # Decode clues from remaining data
+    # Decode clues from remaining data (best-effort; some callers ignore clues)
     clue_data = data[n_vchars + n_hchars:]
-    clues = decode_nurikabe(cols, rows, clue_data) if clue_data else []
+    clues = []
+    if clue_data:
+        try:
+            clues = decode_nurikabe(cols, rows, clue_data)
+        except ValueError:
+            clues = []
 
     return vborders, hborders, clues
 
@@ -888,11 +903,119 @@ def decode_puzzle(url, title="", date=""):
         clues = [(idx // cols, idx % cols, val) for idx, val in entries]
         return MashuPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
                           title=title, date=date, url=url, clues=clues)
-    elif puzzle_type in ("shikaku", "kurotto", "chainedb"):
+    elif puzzle_type in ("shikaku", "kurotto", "chainedb",
+                          "hashi", "kurodoko", "mochikoro"):
         entries, _ = decode_number16(cols * rows, data)
         clues = [(idx // cols, idx % cols, val) for idx, val in entries]
         return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
                              title=title, date=date, url=url, clues=clues)
+    elif puzzle_type in ("sukoro", "view"):
+        # Number10: digits 0-9 with '.' for empty marker.
+        clues = []
+        c = 0
+        i = 0
+        total = cols * rows
+        while i < len(data) and c < total:
+            ca = data[i]
+            if ca == ".":
+                clues.append((c // cols, c % cols, -2))
+                c += 1
+            elif "0" <= ca <= "9":
+                clues.append((c // cols, c % cols, int(ca)))
+                c += 1
+            elif "a" <= ca <= "z":
+                c += int(ca, 36) - 10 + 1
+            else:
+                c += 1
+            i += 1
+        return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                             title=title, date=date, url=url, clues=clues)
+    elif puzzle_type == "fivecells":
+        # decodeFivecells: '7' = block (ques=7); '.' = -2; '0'-'9' = number; 'a'-'z' = skip.
+        clues = []
+        c = 0
+        i = 0
+        total = cols * rows
+        while i < len(data) and c < total:
+            ca = data[i]
+            if ca == "7":
+                clues.append((c // cols, c % cols, -3))   # block marker
+                c += 1
+            elif ca == ".":
+                clues.append((c // cols, c % cols, -2))
+                c += 1
+            elif "0" <= ca <= "9":
+                clues.append((c // cols, c % cols, int(ca)))
+                c += 1
+            elif "a" <= ca <= "z":
+                c += int(ca, 36) - 10 + 1
+            else:
+                c += 1
+            i += 1
+        return NurikabePuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                             title=title, date=date, url=url, clues=clues)
+    elif puzzle_type == "factors":
+        vborders, hborders, consumed = decode_borders_only(cols, rows, data)
+        room_tops = _find_room_top_cells(cols, rows, vborders, hborders)
+        entries, _ = decode_number16(len(room_tops), data[consumed:])
+        clues = []
+        for idx, val in entries:
+            r, c_pos = room_tops[idx]
+            clues.append((r, c_pos, val))
+        return RegionPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           vborders=vborders, hborders=hborders, clues=clues)
+    elif puzzle_type == "wagiri":
+        # decode4Cross on (cols+1)*(rows+1) intersections, then decodeNumber10 in cells.
+        n_cross = (cols + 1) * (rows + 1)
+        cross_clues = []
+        c_pos = 0
+        i = 0
+        # Same encoding as decode_usoone_clues but operating on cross grid.
+        cross_data_consumed = 0
+        while i < len(data) and c_pos < n_cross:
+            ca = data[i]
+            if "0" <= ca <= "4":
+                cross_clues.append((c_pos // (cols + 1), c_pos % (cols + 1), int(ca, 16)))
+                c_pos += 1
+            elif "5" <= ca <= "9":
+                cross_clues.append((c_pos // (cols + 1), c_pos % (cols + 1), int(ca, 16) - 5))
+                c_pos += 2
+            elif "a" <= ca <= "e":
+                cross_clues.append((c_pos // (cols + 1), c_pos % (cols + 1), int(ca, 16) - 10))
+                c_pos += 3
+            elif "g" <= ca <= "z":
+                c_pos += int(ca, 36) - 16 + 1
+            elif ca == ".":
+                cross_clues.append((c_pos // (cols + 1), c_pos % (cols + 1), -2))
+                c_pos += 1
+            else:
+                c_pos += 1
+            i += 1
+            cross_data_consumed = i
+        rest = data[cross_data_consumed:]
+        # decodeNumber10 for cell numbers.
+        cell_clues = []
+        c_pos = 0
+        i = 0
+        total = cols * rows
+        while i < len(rest) and c_pos < total:
+            ca = rest[i]
+            if ca == ".":
+                cell_clues.append((c_pos // cols, c_pos % cols, -2))
+                c_pos += 1
+            elif "0" <= ca <= "9":
+                cell_clues.append((c_pos // cols, c_pos % cols, int(ca)))
+                c_pos += 1
+            elif "a" <= ca <= "z":
+                c_pos += int(ca, 36) - 10 + 1
+            else:
+                c_pos += 1
+            i += 1
+        # Reuse WagiriPuzzle (new dataclass below)
+        return WagiriPuzzle(puzzle_type=puzzle_type, cols=cols, rows=rows,
+                           title=title, date=date, url=url,
+                           cross_clues=cross_clues, cell_clues=cell_clues)
     elif puzzle_type in ("akari", "lightup"):
         clues = decode_usoone_clues(cols, rows, data, support_dot=True)
         return NurikabePuzzle(puzzle_type="akari", cols=cols, rows=rows,

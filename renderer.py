@@ -14,7 +14,7 @@ from puzzles import (
     NurikabePuzzle, IceBarnPuzzle, RegionPuzzle, RegionArrowPuzzle, DbchocoPuzzle,
     MidloopPuzzle, PipelinkPuzzle, FireflyPuzzle, UnknownPuzzle,
     MashuPuzzle, SimpleLoopPuzzle, StarBattlePuzzle, IcelomPuzzle, BarnsPuzzle,
-    ReflectPuzzle, SlalomPuzzle, KinkonkanPuzzle, ShwolfPuzzle,
+    ReflectPuzzle, SlalomPuzzle, KinkonkanPuzzle, ShwolfPuzzle, WagiriPuzzle,
 )
 
 # Register Japanese font
@@ -69,6 +69,11 @@ ENGLISH_NAMES = {
     "icelom": "Icelom",
     "icelom2": "Icelom 2",
     "slalom": "Slalom",
+    "kurodoko": "Kurodoko",
+    "mochikoro": "Mochikoro",
+    "sukoro": "Sukoro",
+    "wagiri": "Wagiri",
+    "factors": "Rooms of Factors",
     "shugaku": "School Trip",
     "ayeheya": "Aye-Heya",
     "yajikazu": "Yajikazu",
@@ -205,6 +210,8 @@ def render_nurikabe(c, puzzle):
     is_kurotto = puzzle.puzzle_type == "kurotto"
     is_chainedb = puzzle.puzzle_type == "chainedb"
     is_shugaku = puzzle.puzzle_type == "shugaku"
+    is_hashi = puzzle.puzzle_type == "hashi"
+    is_fivecells = puzzle.puzzle_type == "fivecells"
 
     is_gokigen = puzzle.puzzle_type == "gokigen"
 
@@ -325,6 +332,30 @@ def render_nurikabe(c, puzzle):
             text = "?" if val == -2 else str(val)
             c.setFont("Helvetica-Bold", font_size)
             c.drawCentredString(cx, cy - font_size * 0.3, text)
+        elif is_hashi:
+            # Hashi: number in a circle (island)
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setFillColorRGB(1, 1, 1)
+            c.setLineWidth(1.5)
+            c.circle(cx, cy, cell_size * 0.4, stroke=1, fill=1)
+            if val >= 0:
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(val))
+        elif is_fivecells:
+            if val == -3:
+                # Block cell (ques=7)
+                c.setFillColorRGB(0, 0, 0)
+                c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                       cell_size, cell_size, stroke=0, fill=1)
+            elif val == -2:
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, "?")
+            else:
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3, str(val))
         else:
             c.setFont("Helvetica-Bold", font_size)
             c.drawCentredString(cx, cy - font_size * 0.3, str(val))
@@ -1024,6 +1055,53 @@ def render_shwolf(c, puzzle):
             c.circle(cx, cy, radius, stroke=0, fill=1)
 
 
+def render_wagiri(c, puzzle):
+    """Wagiri: dashed grid + intersection circles (gokigen-style) + cell numbers."""
+    cell_size = min((PAGE_W - 2 * MARGIN) / puzzle.cols,
+                    (PAGE_H - 2 * MARGIN - HEADER_HEIGHT) / puzzle.rows)
+    grid_w = cell_size * puzzle.cols
+    grid_h = cell_size * puzzle.rows
+    x0 = MARGIN + ((PAGE_W - 2 * MARGIN) - grid_w) / 2
+    y_top = PAGE_H - MARGIN - HEADER_HEIGHT
+    y0 = y_top - ((PAGE_H - 2 * MARGIN - HEADER_HEIGHT) - grid_h) / 2 - grid_h
+    # Dashed grid
+    c.setStrokeColorRGB(0.5, 0.5, 0.5)
+    c.setLineWidth(0.5)
+    c.setDash(3, 3)
+    for i in range(puzzle.rows + 1):
+        y = y0 + i * cell_size
+        c.line(x0, y, x0 + puzzle.cols * cell_size, y)
+    for j in range(puzzle.cols + 1):
+        x = x0 + j * cell_size
+        c.line(x, y0, x, y0 + puzzle.rows * cell_size)
+    c.setDash()
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(2)
+    c.rect(x0, y0, puzzle.cols * cell_size, puzzle.rows * cell_size, stroke=1, fill=0)
+    # Intersection circles with numbers
+    radius = cell_size * 0.2
+    cross_font = min(radius * 1.4, 14)
+    for row, col, val in puzzle.cross_clues:
+        ix = x0 + col * cell_size
+        iy = y0 + (puzzle.rows - row) * cell_size
+        c.setFillColorRGB(1, 1, 1)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(1.5)
+        c.circle(ix, iy, radius, stroke=1, fill=1)
+        if val != -2:
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Helvetica-Bold", cross_font)
+            c.drawCentredString(ix, iy - cross_font * 0.3, str(val))
+    # Cell numbers
+    cell_font = min(cell_size * 0.5, 18)
+    c.setFont("Helvetica-Bold", cell_font)
+    for row, col, val in puzzle.cell_clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        text = "?" if val == -2 else str(val)
+        c.setFillColorRGB(0, 0, 0)
+        c.drawCentredString(cx, cy - cell_font * 0.3, text)
+
+
 def render_unknown(c, puzzle):
     """Render a placeholder page for unsupported puzzle types."""
     c.setFont("Helvetica", 24)
@@ -1055,6 +1133,7 @@ RENDERERS = {
     SlalomPuzzle: render_slalom,
     KinkonkanPuzzle: render_kinkonkan,
     ShwolfPuzzle: render_shwolf,
+    WagiriPuzzle: render_wagiri,
     UnknownPuzzle: render_unknown,
 }
 
