@@ -10,14 +10,6 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from puzzles import (
-    NurikabePuzzle, IceBarnPuzzle, RegionPuzzle, RegionArrowPuzzle, DbchocoPuzzle,
-    MidloopPuzzle, PipelinkPuzzle, FireflyPuzzle, UnknownPuzzle,
-    MashuPuzzle, SimpleLoopPuzzle, StarBattlePuzzle, IcelomPuzzle, BarnsPuzzle,
-    ReflectPuzzle, SlalomPuzzle, KinkonkanPuzzle, ShwolfPuzzle, WagiriPuzzle,
-    CbblockPuzzle, BdblockPuzzle, KakuroPuzzle,
-)
-
 # Register Japanese font
 _JP_FONT = "DroidSansFallback"
 pdfmetrics.registerFont(TTFont(_JP_FONT, "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"))
@@ -25,86 +17,8 @@ pdfmetrics.registerFont(TTFont(_JP_FONT, "/usr/share/fonts/truetype/droid/DroidS
 PAGE_W, PAGE_H = A4
 MARGIN = 20 * mm
 HEADER_HEIGHT = 20 * mm
-
-# English names for puzzle types
-ENGLISH_NAMES = {
-    "nurikabe": "Nurikabe",
-    "fillomino": "Fillomino",
-    "hitori": "Hitori",
-    "icebarn": "Ice Barn",
-    "nanro": "Nanro",
-    "lits": "LITS",
-    "shimaguni": "Islands",
-    "country": "Country Road",
-    "norinori": "Norinori",
-    "heyawake": "Heyawake",
-    "usoone": "Uso-one",
-    "slither": "Slitherlink",
-    "mashu": "Masyu",
-    "tapa": "Tapa",
-    "shakashaka": "Shakashaka",
-    "gokigen": "Gokigen Naname",
-    "yajirin": "Yajilin",
-    "midloop": "Mid-loop",
-    "simpleloop": "Simple Loop",
-    "bag": "Bag",
-    "starbattle": "Star Battle",
-    "dbchoco": "Double Choco",
-    "firefly": "Hotaru Beam",
-    "numlin": "Numberlink",
-    "pipelink": "Pipelink",
-    "ringring": "Ring Ring",
-    "moonsun": "Moon or Sun",
-    "sashigane": "Sashigane",
-    "chainedb": "Chained Block",
-    "kurotto": "Kurotto",
-    "hebi": "Hebi-Ichigo",
-    "kuroclone": "Kuroclone",
-    "koburin": "Koburin",
-    "kinkonkan": "Kin-Kon-Kan",
-    "kakuro": "Kakuro",
-    "shikaku": "Shikaku",
-    "bdblock": "Border Block",
-    "lightup": "Akari",
-    "akari": "Akari",
-    "icelom": "Icelom",
-    "icelom2": "Icelom 2",
-    "slalom": "Slalom",
-    "kurodoko": "Kurodoko",
-    "mochikoro": "Mochikoro",
-    "sukoro": "Sukoro",
-    "wagiri": "Wagiri",
-    "shugaku": "School Trip",
-    "ayeheya": "Aye-Heya",
-    "yajikazu": "Yajikazu",
-    "reflect": "Reflect Link",
-    "factors": "Rooms of Factors",
-    "kurodoko": "Kurodoko",
-    "fivecells": "Five Cells",
-    "tasquare": "Tasquare",
-    "cocktail": "Cocktail Lamp",
-    "cbblock": "Color Block",
-    "mochikoro": "Mochikoro",
-    "paintarea": "Paint Area",
-    "hashikake": "Hashiwokakero",
-    "nuribou": "Nuribou",
-    "wagiri": "Wagiri",
-    "chocona": "Chocona",
-    "creek": "Creek",
-    "sukoro": "Sukoro",
-    "barns": "Barns",
-    "nurimaze": "Nurimaze",
-    "tateyoko": "Tateyoko",
-    "tatamibari": "Tatamibari",
-    "yosenabe": "Yosenabe",
-    "sudoku": "Sudoku",
-    "hashi": "Hashiwokakero",
-    "makaro": "Makaro",
-    "view": "View",
-    "snakes": "Snakes",
-    "shwolf": "Sheep and Wolves",
-    "yajilin-regions": "Regional Yajilin",
-}
+RULES_HEIGHT = 32 * mm
+RULES_BOX_HEIGHT = 27 * mm
 
 # Fullwidth digit mapping
 _FW_DIGITS = "０１２３４５６７８９"
@@ -128,7 +42,10 @@ def _extract_date(date_str):
 
 def _english_header(puzzle):
     """Return English header like 'Nurikabe 367  2026-02-15'."""
-    name = ENGLISH_NAMES.get(puzzle.puzzle_type, puzzle.puzzle_type)
+    from puzzle_types import get_type_module
+    type_module = get_type_module(puzzle.puzzle_type)
+    name = (type_module.ENGLISH_NAME if type_module is not None
+            else puzzle.puzzle_type)
     num = _extract_number(puzzle.title)
     date = _extract_date(puzzle.date)
     if num is not None:
@@ -152,7 +69,7 @@ def _draw_header(c, puzzle, page_w, page_h):
 def _calc_grid_params(puzzle, page_w, page_h):
     """Calculate cell size and grid origin for centering the grid on the page."""
     available_w = page_w - 2 * MARGIN
-    available_h = page_h - 2 * MARGIN - HEADER_HEIGHT
+    available_h = page_h - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT
     cell_size = min(available_w / puzzle.cols, available_h / puzzle.rows)
     grid_w = cell_size * puzzle.cols
     grid_h = cell_size * puzzle.rows
@@ -229,12 +146,14 @@ def render_nurikabe(c, puzzle):
     if is_gokigen:
         # Gokigen: dashed grid lines + circles with numbers at intersections
         cell_size = min((PAGE_W - 2 * MARGIN) / puzzle.cols,
-                       (PAGE_H - 2 * MARGIN - HEADER_HEIGHT) / puzzle.rows)
+                       (PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT) /
+                       puzzle.rows)
         grid_w = cell_size * puzzle.cols
         grid_h = cell_size * puzzle.rows
         x0 = MARGIN + ((PAGE_W - 2 * MARGIN) - grid_w) / 2
         y_top = PAGE_H - MARGIN - HEADER_HEIGHT
-        y0 = y_top - ((PAGE_H - 2 * MARGIN - HEADER_HEIGHT) - grid_h) / 2 - grid_h
+        y0 = y_top - ((PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT) -
+                      grid_h) / 2 - grid_h
         # Dashed grid
         c.setStrokeColorRGB(0.5, 0.5, 0.5)
         c.setLineWidth(0.5)
@@ -567,7 +486,7 @@ def render_dbchoco(c, puzzle):
 def render_midloop(c, puzzle):
     """Render midloop. Grid with dots at cell centers and edges."""
     available_w = PAGE_W - 2 * MARGIN
-    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT
+    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT
     cell_size = min(available_w / puzzle.cols, available_h / puzzle.rows)
     grid_w = cell_size * puzzle.cols
     grid_h = cell_size * puzzle.rows
@@ -662,7 +581,7 @@ def render_firefly(c, puzzle):
     else:
         # Firefly: clues on intersections of a dashed grid
         available_w = PAGE_W - 2 * MARGIN
-        available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT
+        available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT
         cell_size = min(available_w / (puzzle.cols - 1), available_h / (puzzle.rows - 1))
         grid_w = cell_size * (puzzle.cols - 1)
         grid_h = cell_size * (puzzle.rows - 1)
@@ -1000,7 +919,7 @@ def render_slalom(c, puzzle):
 def render_kinkonkan(c, puzzle):
     # Allocate margin around grid for edge clues
     available_w = PAGE_W - 2 * MARGIN
-    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT
+    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT
     # Reserve 1.2 cells worth of space on each side for the clues
     cell_size = min(available_w / (puzzle.cols + 2.4), available_h / (puzzle.rows + 2.4))
     grid_w = cell_size * puzzle.cols
@@ -1118,12 +1037,14 @@ def render_kakuro(c, puzzle):
 def render_wagiri(c, puzzle):
     """Wagiri: dashed grid + intersection circles (gokigen-style) + cell numbers."""
     cell_size = min((PAGE_W - 2 * MARGIN) / puzzle.cols,
-                    (PAGE_H - 2 * MARGIN - HEADER_HEIGHT) / puzzle.rows)
+                    (PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT) /
+                    puzzle.rows)
     grid_w = cell_size * puzzle.cols
     grid_h = cell_size * puzzle.rows
     x0 = MARGIN + ((PAGE_W - 2 * MARGIN) - grid_w) / 2
     y_top = PAGE_H - MARGIN - HEADER_HEIGHT
-    y0 = y_top - ((PAGE_H - 2 * MARGIN - HEADER_HEIGHT) - grid_h) / 2 - grid_h
+    y0 = y_top - ((PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT) -
+                  grid_h) / 2 - grid_h
     # Dashed grid
     c.setStrokeColorRGB(0.5, 0.5, 0.5)
     c.setLineWidth(0.5)
@@ -1154,12 +1075,149 @@ def render_wagiri(c, puzzle):
             c.drawCentredString(ix, iy - cross_font * 0.3, str(val))
     # Cell numbers
     cell_font = min(cell_size * 0.5, 18)
-    c.setFont("Helvetica-Bold", cell_font)
     for row, col, val in puzzle.cell_clues:
         cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
-        text = "?" if val == -2 else str(val)
+        text = {-2: "?", 1: "輪", 2: "切"}.get(val, str(val))
+        c.setFont(_JP_FONT if val in (1, 2) else "Helvetica-Bold", cell_font)
         c.setFillColorRGB(0, 0, 0)
         c.drawCentredString(cx, cy - cell_font * 0.3, text)
+
+
+def render_creek(c, puzzle):
+    """Render Creek clues on grid intersections."""
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
+    radius = cell_size * 0.22
+    font_size = min(cell_size * 0.42, 16)
+    for row, col, value in puzzle.clues:
+        cx = x0 + col * cell_size
+        cy = y0 + (puzzle.rows - row) * cell_size
+        c.setFillColorRGB(1, 1, 1)
+        c.circle(cx, cy, radius, stroke=0, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", font_size)
+        text = "?" if value < 0 else str(value)
+        c.drawCentredString(cx, cy - font_size * 0.3, text)
+
+
+def render_nurimaze(c, puzzle):
+    """Render Nurimaze regions, start/goal, circles, and triangles."""
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    _draw_region_borders(c, puzzle, cell_size, x0, y0)
+    radius = cell_size * 0.3
+    font_size = min(cell_size * 0.35, 14)
+    for row, col, value in puzzle.clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setFillColorRGB(1, 1, 1)
+        c.setLineWidth(1.8)
+        if value in (1, 2, 3):
+            c.circle(cx, cy, radius, stroke=1, fill=1)
+            if value in (1, 2):
+                c.setFillColorRGB(0, 0, 0)
+                c.setFont("Helvetica-Bold", font_size)
+                c.drawCentredString(cx, cy - font_size * 0.3,
+                                    "S" if value == 1 else "G")
+        elif value == 4:
+            path = c.beginPath()
+            path.moveTo(cx, cy + radius)
+            path.lineTo(cx - radius, cy - radius)
+            path.lineTo(cx + radius, cy - radius)
+            path.close()
+            c.drawPath(path, stroke=1, fill=0)
+
+
+def render_tateyoko(c, puzzle):
+    """Render Tateyoko's numbered cells and black block cells."""
+    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
+    c.setStrokeColorRGB(0.55, 0.55, 0.55)
+    c.setLineWidth(0.5)
+    c.setDash(3, 3)
+    for row in range(puzzle.rows + 1):
+        y = y0 + row * cell_size
+        c.line(x0, y, x0 + puzzle.cols * cell_size, y)
+    for col in range(puzzle.cols + 1):
+        x = x0 + col * cell_size
+        c.line(x, y0, x, y0 + puzzle.rows * cell_size)
+    c.setDash()
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(2)
+    c.rect(x0, y0, puzzle.cols * cell_size, puzzle.rows * cell_size,
+           stroke=1, fill=0)
+    font_size = min(cell_size * 0.55, 20)
+    for row, col, value, blocked in puzzle.clues:
+        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
+        if blocked:
+            c.setFillColorRGB(0, 0, 0)
+            c.rect(cx - cell_size / 2, cy - cell_size / 2,
+                   cell_size, cell_size, stroke=0, fill=1)
+        if value is not None:
+            c.setFillColorRGB(1, 1, 1) if blocked else c.setFillColorRGB(0, 0, 0)
+            c.setFont("Helvetica-Bold", font_size)
+            text = "?" if value == -2 else str(value)
+            c.drawCentredString(cx, cy - font_size * 0.3, text)
+
+
+def _wrap_rule(text, font_name, font_size, max_width):
+    """Wrap one rule using ReportLab's actual font metrics."""
+    lines = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_rules(c, type_module):
+    """Draw a compact, consistently sized rules box in the page footer."""
+    rules = getattr(type_module, "RULES", ())
+    if not rules:
+        return
+
+    x = MARGIN
+    y = MARGIN
+    width = PAGE_W - 2 * MARGIN
+    height = RULES_BOX_HEIGHT
+    padding = 6
+    text_x = x + padding + 7
+    text_width = width - 2 * padding - 7
+
+    font_size = 8.5
+    leading = 10
+    while True:
+        wrapped = [_wrap_rule(rule, "Helvetica", font_size, text_width)
+                   for rule in rules]
+        line_count = sum(len(lines) for lines in wrapped)
+        needed = 15 + line_count * leading
+        if needed <= height - 2 * padding or font_size <= 5.8:
+            break
+        font_size -= 0.2
+        leading -= 0.2
+
+    c.saveState()
+    c.setFillColorRGB(0.975, 0.975, 0.975)
+    c.setStrokeColorRGB(0.65, 0.65, 0.65)
+    c.setLineWidth(0.6)
+    c.roundRect(x, y, width, height, 4, stroke=1, fill=1)
+
+    top = y + height - padding - 7
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(x + padding, top, "QUICK RULES")
+    cursor_y = top - 11
+    c.setFont("Helvetica", font_size)
+    for lines in wrapped:
+        c.drawString(x + padding, cursor_y, "-")
+        for line in lines:
+            c.drawString(text_x, cursor_y, line)
+            cursor_y -= leading
+    c.restoreState()
 
 
 def render_unknown(c, puzzle):
@@ -1175,29 +1233,32 @@ def render_unknown(c, puzzle):
                         f"{puzzle.cols} x {puzzle.rows}")
 
 
-RENDERERS = {
-    NurikabePuzzle: render_nurikabe,
-    IceBarnPuzzle: render_icebarn,
-    RegionPuzzle: render_region,
-    RegionArrowPuzzle: render_region_arrow,
-    DbchocoPuzzle: render_dbchoco,
-    MidloopPuzzle: render_midloop,
-    PipelinkPuzzle: render_pipelink,
-    FireflyPuzzle: render_firefly,
-    MashuPuzzle: render_mashu,
-    SimpleLoopPuzzle: render_simpleloop,
-    StarBattlePuzzle: render_starbattle,
-    IcelomPuzzle: render_icelom,
-    BarnsPuzzle: render_barns,
-    ReflectPuzzle: render_reflect,
-    SlalomPuzzle: render_slalom,
-    KinkonkanPuzzle: render_kinkonkan,
-    ShwolfPuzzle: render_shwolf,
-    WagiriPuzzle: render_wagiri,
-    CbblockPuzzle: render_cbblock,
-    BdblockPuzzle: render_bdblock,
-    KakuroPuzzle: render_kakuro,
-    UnknownPuzzle: render_unknown,
+# Per-type modules select one of these reusable drawing implementations.
+TYPE_RENDERERS = {
+    "nurikabe": render_nurikabe,
+    "icebarn": render_icebarn,
+    "region": render_region,
+    "region_arrow": render_region_arrow,
+    "dbchoco": render_dbchoco,
+    "midloop": render_midloop,
+    "pipelink": render_pipelink,
+    "firefly": render_firefly,
+    "mashu": render_mashu,
+    "simpleloop": render_simpleloop,
+    "starbattle": render_starbattle,
+    "icelom": render_icelom,
+    "barns": render_barns,
+    "reflect": render_reflect,
+    "slalom": render_slalom,
+    "kinkonkan": render_kinkonkan,
+    "shwolf": render_shwolf,
+    "wagiri": render_wagiri,
+    "cbblock": render_cbblock,
+    "bdblock": render_bdblock,
+    "kakuro": render_kakuro,
+    "creek": render_creek,
+    "nurimaze": render_nurimaze,
+    "tateyoko": render_tateyoko,
 }
 
 
@@ -1220,8 +1281,13 @@ def render_pdf(puzzles, output_path, year=None, month=None):
 
     for puzzle in puzzles:
         _draw_header(c, puzzle, PAGE_W, PAGE_H)
-        renderer = RENDERERS.get(type(puzzle), render_unknown)
+        from puzzle_types import get_type_module
+        type_module = get_type_module(puzzle.puzzle_type)
+        renderer = (TYPE_RENDERERS.get(type_module.RENDERER, render_unknown)
+                    if type_module is not None else render_unknown)
         renderer(c, puzzle)
+        if type_module is not None:
+            _draw_rules(c, type_module)
         c.showPage()
 
     c.save()
