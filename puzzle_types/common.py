@@ -269,20 +269,37 @@ def kakuro(puzzle_type, cols, rows, data, title, date, url):
     while offset < len(data) and cell < cols * rows:
         char = data[offset]
         if "k" <= char <= "z":
-            cell += int(char, 36) - 18
+            # k-z encode runs of 1-16 ordinary (white) cells.
+            cell += int(char, 36) - 19
             offset += 1
         elif char == ".":
             clue_cells.append((cell // cols, cell % cols, -1, -1))
             cell += 1
             offset += 1
         else:
-            across = value(char)
-            down = value(data[offset + 1]) if offset + 1 < len(data) else -1
+            # Puzz.link stores the down clue first and the across clue second.
+            down = value(char)
+            across = value(data[offset + 1]) if offset + 1 < len(data) else -1
             clue_cells.append((cell // cols, cell % cols, across, down))
             cell += 1
             offset += 2
+
+    # Kakuro's top and left clue bands are ExCells in pzpr.js. Their values
+    # follow the in-grid data, first across the top and then down the left,
+    # with no value encoded where the adjacent in-grid cell is itself a clue.
+    clue_positions = {(row, col) for row, col, _across, _down in clue_cells}
+    edge_clues = []
+    for col in range(cols):
+        if (0, col) not in clue_positions and offset < len(data):
+            edge_clues.append(("top", col, value(data[offset])))
+            offset += 1
+    for row in range(rows):
+        if (row, 0) not in clue_positions and offset < len(data):
+            edge_clues.append(("left", row, value(data[offset])))
+            offset += 1
+
     return p.KakuroPuzzle(**_args(puzzle_type, cols, rows, title, date, url),
-                          clue_cells=clue_cells, edge_clues=[])
+                          clue_cells=clue_cells, edge_clues=edge_clues)
 
 
 def wagiri(puzzle_type, cols, rows, data, title, date, url):

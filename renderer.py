@@ -1010,21 +1010,40 @@ def render_bdblock(c, puzzle):
 
 
 def render_kakuro(c, puzzle):
-    cell_size, x0, y0 = _calc_grid_params(puzzle, PAGE_W, PAGE_H)
-    _draw_grid(c, puzzle.rows, puzzle.cols, cell_size, x0, y0)
-    font_size = min(cell_size * 0.32, 12)
-    for row, col, across, down in puzzle.clue_cells:
-        cx, cy = _cell_center(row, col, puzzle.rows, cell_size, x0, y0)
-        # Black filled cell with diagonal line (top-left to bottom-right)
-        c.setFillColorRGB(0, 0, 0)
+    # Kakuro has an extra clue row and column outside the playable grid.
+    rows = puzzle.rows + 1
+    cols = puzzle.cols + 1
+    available_w = PAGE_W - 2 * MARGIN
+    available_h = PAGE_H - 2 * MARGIN - HEADER_HEIGHT - RULES_HEIGHT
+    cell_size = min(available_w / cols, available_h / rows)
+    grid_w = cell_size * cols
+    grid_h = cell_size * rows
+    x0 = MARGIN + (available_w - grid_w) / 2
+    y_top = PAGE_H - MARGIN - HEADER_HEIGHT
+    y0 = y_top - (available_h - grid_h) / 2 - grid_h
+
+    # Display coordinates include the outside clue band. Every cell in that
+    # band is grey, as are the diagonal clue cells inside the puzzle.
+    clue_cells = {(0, col) for col in range(cols)}
+    clue_cells.update((row, 0) for row in range(rows))
+    clue_cells.update((row + 1, col + 1)
+                      for row, col, _across, _down in puzzle.clue_cells)
+    c.setFillColorRGB(0.75, 0.75, 0.75)
+    for row, col in clue_cells:
+        cx, cy = _cell_center(row, col, rows, cell_size, x0, y0)
         c.rect(cx - cell_size / 2, cy - cell_size / 2,
                cell_size, cell_size, stroke=0, fill=1)
-        c.setStrokeColorRGB(1, 1, 1)
-        c.setLineWidth(1.0)
+
+    _draw_grid(c, rows, cols, cell_size, x0, y0)
+    font_size = min(cell_size * 0.32, 12)
+
+    def draw_clue(row, col, across=-1, down=-1):
+        cx, cy = _cell_center(row, col, rows, cell_size, x0, y0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.5)
         c.line(cx - cell_size / 2, cy + cell_size / 2,
                cx + cell_size / 2, cy - cell_size / 2)
-        c.setStrokeColorRGB(0, 0, 0)
-        c.setFillColorRGB(1, 1, 1)
+        c.setFillColorRGB(0, 0, 0)
         c.setFont("Helvetica-Bold", font_size)
         if across > 0:
             # Top-right triangle: across (sum to the right)
@@ -1032,6 +1051,36 @@ def render_kakuro(c, puzzle):
         if down > 0:
             # Bottom-left triangle: down (sum below)
             c.drawString(cx - cell_size * 0.42, cy - cell_size * 0.42 + 1, str(down))
+
+    edge_values = {(side, index): value
+                   for side, index, value in puzzle.edge_clues}
+    draw_clue(0, 0)
+    for col in range(puzzle.cols):
+        draw_clue(0, col + 1, down=edge_values.get(("top", col), -1))
+    for row in range(puzzle.rows):
+        draw_clue(row + 1, 0, across=edge_values.get(("left", row), -1))
+    for row, col, across, down in puzzle.clue_cells:
+        draw_clue(row + 1, col + 1, across, down)
+
+    # Emphasize each transition between clue cells and answer cells.
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(2)
+    for row, col in clue_cells:
+        left = x0 + col * cell_size
+        right = left + cell_size
+        top = y0 + (rows - row) * cell_size
+        bottom = top - cell_size
+        if row > 0 and (row - 1, col) not in clue_cells:
+            c.line(left, top, right, top)
+        if row + 1 < rows and (row + 1, col) not in clue_cells:
+            c.line(left, bottom, right, bottom)
+        if col > 0 and (row, col - 1) not in clue_cells:
+            c.line(left, bottom, left, top)
+        if col + 1 < cols and (row, col + 1) not in clue_cells:
+            c.line(right, bottom, right, top)
+
+    # Redraw the outer border after the transition lines.
+    c.rect(x0, y0, grid_w, grid_h, stroke=1, fill=0)
 
 
 def render_wagiri(c, puzzle):

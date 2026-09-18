@@ -26,6 +26,11 @@ CASES = {
     ),
 }
 
+KAKURO_254 = (
+    "https://puzz.link/p?kakuro/11/11/"
+    "00gjm04lf4l0Kn6fo7dlOcmO7qbgo00lOjmgalP0D0oCPo00KhlJAmKglEPoEJqhEmggl00o0Kn00l0gl0Dm0000JhDb3a7A3gEOg"
+)
+
 
 class PuzzleTypeTests(unittest.TestCase):
     def test_every_supported_type_has_a_complete_module(self):
@@ -55,6 +60,23 @@ class PuzzleTypeTests(unittest.TestCase):
     def test_tateyoko_preserves_block_cells(self):
         puzzle = decode_puzzle(CASES["tateyoko"][0])
         self.assertTrue(any(blocked for _row, _col, _value, blocked in puzzle.clues))
+
+    def test_kakuro_decodes_runs_and_outside_clues(self):
+        puzzle = decode_puzzle(KAKURO_254)
+
+        self.assertIn((0, 1, 19, 16), puzzle.clue_cells)
+        self.assertIn((2, 3, 12, 34), puzzle.clue_cells)
+        self.assertIn((7, 6, 29, 24), puzzle.clue_cells)
+        self.assertEqual(
+            puzzle.edge_clues,
+            [
+                ("top", 2, 29), ("top", 3, 17), ("top", 4, 23),
+                ("top", 6, 11), ("top", 7, 3), ("top", 9, 10),
+                ("top", 10, 7), ("left", 3, 20), ("left", 4, 3),
+                ("left", 5, 16), ("left", 8, 24), ("left", 9, 34),
+                ("left", 10, 16),
+            ],
+        )
 
 
 if __name__ == "__main__":
